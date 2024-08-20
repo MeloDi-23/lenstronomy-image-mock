@@ -1,0 +1,5 @@
+images/*
+*.pdf
+*.npy
+__pycache__/*
+*.csv
