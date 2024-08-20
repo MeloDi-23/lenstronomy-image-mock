@@ -21,6 +21,11 @@ parser.add_argument('--pickle', '-p', action='store_true', help='pickle the para
 
 args = parser.parse_args()
 
+import sys
+with open('make_e_r.log', 'a+') as f:
+    f.write(' '.join(sys.argv)+'\n')
+
+
 theta_E = einstein_radius(args.M0, args.d_l, args.d_s)
 deltaPix = args.deltaPix
 fwhm = args.fwhm
@@ -88,26 +93,6 @@ plt.imshow(image)
 plt.savefig(f'./image.pdf')
 
 
-num = 30
-xx = np.linspace(-theta_E*0.6, theta_E*0.6, num)
-xx, yy = np.meshgrid(xx, xx)
-e = np.zeros_like(xx)
-
-# from calc_ellip import calc_ellip
-
-# if args.galsim:
-#     def e_func(image):
-#         try:
-#             res = galsim.hsm.FindAdaptiveMom(galsim.Image(image))
-#         except galsim.errors.GalSimHSMError:
-#             print_err()
-
-
-#         return res.observed_shape.e 
-# else:
-#     e_func = lambda image: calc_ellip(image)[-1]
-
-import sys
 def print_err(ps, l, image):
     print('argument:', file=sys.stderr)
     print(f'{args}', file=sys.stderr)
@@ -117,10 +102,12 @@ def print_err(ps, l, image):
 Nbin = 30
 r = np.linspace(theta_E*0.01, theta_E*1, Nbin)
 Nsamp = 100
-sample = np.zeros((Nbin, Nsamp), float)
 
-import tqdm
-for i in tqdm.trange(Nsamp):
+import multiprocessing as mp
+sender, recev = mp.Pipe()
+
+def calculate_each_samp(i):
+    ee = np.zeros(Nbin)
     thetas = np.random.uniform(0, 2*np.pi, Nbin)
     rand_offset_1 = np.random.uniform(-deltaPix, deltaPix, Nbin)
     rand_offset_2 = np.random.uniform(-deltaPix, deltaPix, Nbin)
@@ -142,12 +129,32 @@ for i in tqdm.trange(Nsamp):
             e = np.nan
         else:
             e = res.observed_shape.e
+        ee[j] = e
+    sender.send(1)
+    return ee
 
-        sample[j, i] = e
 
+import tqdm
+pbar = tqdm.tqdm(total=Nsamp)
+def process():
+    while True:
+        if recev.recv():
+            pbar.update(1)
+        else:
+            # pbar.close()
+            return
 
-estimate = np.nanmean(sample, axis=1)
-err = np.nanstd(sample, axis=1, ddof=1)
+bar = mp.Process(target=process)
+bar.start()
+
+pool = mp.Pool(20)
+sample = np.vstack(pool.map(calculate_each_samp, range(Nsamp), chunksize=int(Nsamp/20)))
+sender.send(0)
+bar.join()
+assert sample.shape == (Nsamp, Nbin)
+
+estimate = np.nanmean(sample, axis=0)
+err = np.nanstd(sample, axis=0, ddof=1)
 
 
 if args.out:
@@ -156,62 +163,14 @@ else:
     output = f'./e-r/e_{ellip_est}_deltaPix={deltaPix:.2f}'
 
 np.savetxt(output, [estimate, err])
-if args.pickle:
-    import pickle
-    with open(output+'_pickle', 'wb') as f:
-        pickle.dump(
-            {'d_l': args.d_l, 'd_s': args.d_s, 
-            'M0': args.M0, 
-            'deltaPix': deltaPix, 'fwhm': fwhm, 
-            'theta_E': theta_E, 
-            'e': e, 'r_range': r
-            }, f)
-
-# Nrand = 10
-# import tqdm
-# pbar = tqdm.tqdm(total=num*num)
-# for i in range(num):
-#     for j in range(num):
-#         if args.mean:
-#             ee = np.zeros(Nrand)
-#             for k in range(Nrand):
-#                 x_ps, y_ps = np.random.uniform(0, deltaPix, 2)
-#                 x_l = x_ps + xx[i,j]
-#                 y_l = y_ps + yy[i,j]
-#                 image = imageModel.image(
-#                     kwargs_lens = [{'theta_E': theta_E, 'center_x': x_l, 'center_y':y_l}], 
-#                     kwargs_ps = [{'ra_source': x_ps, 'dec_source': y_ps, 'source_amp': 100}])
-#                 try:
-#                     res = galsim.hsm.FindAdaptiveMom(galsim.Image(image))
-#                 except galsim.errors.GalSimHSMError as exp:
-#                     print(f'{exp}:')
-#                     print_err((x_ps, y_ps), (x_l, y_l), image)
-#                     ee[k] = np.nan
-#                     continue
-#                 ee[k] = res.observed_shape.e
-#             e[i,j] = np.nanmean(ee)
-#         else:
-#             x_ps, y_ps = 0, 0
-#             x_l = x_ps + xx[i,j]
-#             y_l = y_ps + yy[i,j]
-#             image = imageModel.image(
-#                 kwargs_lens = [{'theta_E': theta_E, 'center_x': x_l, 'center_y':y_l}], 
-#                 kwargs_ps = [{'ra_source': x_ps, 'dec_source': y_ps, 'source_amp': 100}])
-#             try:
-#                 res = galsim.hsm.FindAdaptiveMom(galsim.Image(image))
-#             except galsim.errors.GalSimHSMError as exp:
-#                 print(f'{exp}:')
-#                 print_err((x_ps, y_ps), (x_l, y_l), image)
-#                 e[i,j] = np.nan
-#                 continue
-#             e[i,j] = res.observed_shape.e
-#         pbar.update(1)
-# pbar.close()
-
-# if args.out:
-#     output = f'./e/{args.out}'
-# else:
-#     output = f'./e/e_{ellip_est}_deltaPix={deltaPix:.2f}'
-# np.savetxt(output, e)
-
+# if args.pickle:
+#     import pickle
+#     with open(output+'_pickle', 'wb') as f:
+#         pickle.dump(
+#             {'d_l': args.d_l, 'd_s': args.d_s, 
+#             'M0': args.M0, 
+#             'deltaPix': deltaPix, 'fwhm': fwhm, 
+#             'theta_E': theta_E, 
+#             'e': estimate, 'r_range': r
+#             }, f)
 

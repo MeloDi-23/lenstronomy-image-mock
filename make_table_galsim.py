@@ -9,7 +9,7 @@ from lenstronomy.Util.util import make_grid
 from lenstronomy.Data.pixel_grid import PixelGrid
 from lenstronomy.Cosmo.micro_lensing import einstein_radius
 import argparse
-
+import sys
 with open('make_table.log', 'a+') as f:
     f.write(' '.join(sys.argv)+'\n')
 
@@ -119,46 +119,66 @@ def print_err(ps, l, image):
     np.save('problem_image.npy', image)
 
 Nrand = 10
-import tqdm
-pbar = tqdm.tqdm(total=num*num)
+import multiprocessing as mp
 
+sender, recev = mp.Pipe()
 
-for i in range(num):
-    for j in range(num):
-        if args.mean:
-            ee = np.zeros(Nrand)
-            for k in range(Nrand):
-                x_ps, y_ps = np.random.uniform(0, deltaPix, 2)
-                x_l = x_ps + xx[i,j]
-                y_l = y_ps + yy[i,j]
-                image = imageModel.image(
-                    kwargs_lens = [{'theta_E': theta_E, 'center_x': x_l, 'center_y':y_l}], 
-                    kwargs_ps = [{'ra_source': x_ps, 'dec_source': y_ps, 'source_amp': 100}])
-                try:
-                    res = galsim.hsm.FindAdaptiveMom(galsim.Image(image))
-                except galsim.errors.GalSimHSMError as exp:
-                    print(f'{exp}:')
-                    print_err((x_ps, y_ps), (x_l, y_l), image)
-                    ee[k] = np.nan
-                    continue
-                ee[k] = res.observed_shape.e
-            e[i,j] = np.nanmean(ee)
-        else:
-            x_ps, y_ps = 0, 0
-            x_l = x_ps + xx[i,j]
-            y_l = y_ps + yy[i,j]
+if args.mean:
+    def mock_and_e(x, y):
+        ee = np.zeros(Nrand)
+        for k in range(Nrand):
+            x_ps, y_ps = np.random.uniform(0, deltaPix, 2)
+            x_l = x_ps + x
+            y_l = y_ps + y
             image = imageModel.image(
                 kwargs_lens = [{'theta_E': theta_E, 'center_x': x_l, 'center_y':y_l}], 
                 kwargs_ps = [{'ra_source': x_ps, 'dec_source': y_ps, 'source_amp': 100}])
             try:
                 res = galsim.hsm.FindAdaptiveMom(galsim.Image(image))
+                ee[k] = res.observed_shape.e
             except galsim.errors.GalSimHSMError as exp:
                 print(f'{exp}:')
                 print_err((x_ps, y_ps), (x_l, y_l), image)
-                e[i,j] = np.nan
+                ee[k] = np.nan
                 continue
-            e[i,j] = res.observed_shape.e
-        pbar.update(1)
+        sender.send(1)
+        #pbar.update(1)
+        return np.nanmean(ee)
+else:
+    def mock_and_e(x, y):
+        x_ps, y_ps = 0, 0
+        x_l = x_ps + x
+        y_l = y_ps + y
+        image = imageModel.image(
+            kwargs_lens = [{'theta_E': theta_E, 'center_x': x_l, 'center_y':y_l}], 
+            kwargs_ps = [{'ra_source': x_ps, 'dec_source': y_ps, 'source_amp': 100}])
+        try:
+            res = galsim.hsm.FindAdaptiveMom(galsim.Image(image))
+        except galsim.errors.GalSimHSMError as exp:
+            print(f'{exp}:')
+            print_err((x_ps, y_ps), (x_l, y_l), image)
+            return np.nan
+        # pbar.update(1)
+        sender.send(1)
+        return res.observed_shape.e
+import tqdm
+pbar = tqdm.tqdm(total=num*num)
+def process():
+    while True:
+        if recev.recv():
+            pbar.update(1)
+        else:
+            pbar.close()
+            return
+
+bar = mp.Process(target=process)
+bar.start()
+pool = mp.Pool(20)
+result = pool.starmap(mock_and_e, zip(xx.flat, yy.flat), chunksize=10)
+sender.send(0)
+bar.join()
+e = np.array(result).reshape(xx.shape)
+
 pbar.close()
 
 if args.out:

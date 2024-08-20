@@ -3,3 +3,4 @@ images/*
 *.npy
 __pycache__/*
 *.csv
+*.log
