@@ -10,7 +10,7 @@ from lenstronomy.Data.pixel_grid import PixelGrid
 from lenstronomy.Cosmo.micro_lensing import einstein_radius
 import argparse
 import sys
-with open('make_table_simp.log', 'a+') as f:
+with open('make_e_simp.log', 'a+') as f:
     f.write(' '.join(sys.argv)+'\n')
 
 parser = argparse.ArgumentParser()
@@ -22,7 +22,6 @@ parser.add_argument('--deltaPix', default=0.2, type=float, help='resolution of i
 parser.add_argument('--fwhm', default=0.7, type=float, help='fwhm of PSF [arcsec]')
 parser.add_argument('--out', '-o', help='output file name')
 parser.add_argument('--pickle', '-p', action='store_true', help='pickle the parameters')
-parser.add_argument('--mean', '-m', action='store_true', help='calculate mean value across different values')
 
 args = parser.parse_args()
 
@@ -76,9 +75,8 @@ class SimpleImageModel:
 mymodel = SimpleImageModel(deltaPix, num_pix, num_pix, (0, 0), psf)
 
 num = 30
-xx = np.linspace(-theta_E*0.6, theta_E*0.6, num)
-xx, yy = np.meshgrid(xx, xx)
-e = np.zeros_like(xx)
+rp = np.linspace(theta_E*1e-3, theta_E*0.6, num)
+e = np.zeros_like(rp)
 
 import sys
 def print_err(ps, l, image):
@@ -87,46 +85,34 @@ def print_err(ps, l, image):
     print(f'ps={ps}, len={l}', file=sys.stderr)
     np.save('problem_image.npy', image)
 
-Nrand = 10
+Nrand = 100
 import multiprocessing as mp
 
 sender, recev = mp.Pipe()
 
-if args.mean:
-    def mock_and_e(x, y):
-        ee = np.zeros(Nrand)
-        for k in range(Nrand):
-            x_ps, y_ps = np.random.uniform(0, deltaPix, 2)
-            x_l = x_ps + x
-            y_l = y_ps + y
-            image = mymodel.mock_image(
-                theta_E, x_l, y_l, x_ps, y_ps, amp
-            )
-            try:
-                res = galsim.hsm.FindAdaptiveMom(galsim.Image(image))
-                ee[k] = res.observed_shape.e
-            except galsim.errors.GalSimHSMError as exp:
-                print(f'{exp}:')
-                print_err((x_ps, y_ps), (x_l, y_l), image)
-                ee[k] = np.nan
-                continue
-        sender.send(1)
-        return np.nanmean(ee)
-else:
-    def mock_and_e(x, y):
-        x_ps, y_ps = 0, 0
-        x_l = x_ps + x
-        y_l = y_ps + y
+def mock_and_e(radius):
+    ee = np.zeros(Nrand)
+    theta = np.random.uniform(0, 2*np.pi, Nrand)
+    x = np.cos(theta)*radius
+    y = np.sin(theta)*radius
+    for k in range(Nrand):        
+        x_ps, y_ps = np.random.uniform(0, deltaPix, 2)
+        x_l = x_ps + x[k]
+        y_l = y_ps + y[k]
         image = mymodel.mock_image(
-            theta_E, x_l, y_l, x_ps, y_ps, amp)
+            theta_E, x_l, y_l, x_ps, y_ps, amp
+        )
         try:
-            res = galsim.hsm.FindAdaptiveMom(galsim.Image(image))
+            res = galsim.hsm.FindAdaptiveMom(image)
+            ee[k] = res.observed_shape.e
         except galsim.errors.GalSimHSMError as exp:
             print(f'{exp}:')
             print_err((x_ps, y_ps), (x_l, y_l), image)
-            return np.nan
-        sender.send(1)
-        return res.observed_shape.e
+            ee[k] = np.nan
+            continue
+    sender.send(1)
+    return np.nanmean(ee), np.nanstd(ee, ddof=1)
+
 import tqdm
 
 def process(total):
@@ -138,21 +124,19 @@ def process(total):
             pbar.close()
             return
 
-bar = mp.Process(target=process, args=(num*num,))
+bar = mp.Process(target=process, args=(num,))
 bar.start()
 pool = mp.Pool(20)
-result = pool.starmap(mock_and_e, zip(xx.flat, yy.flat), chunksize=10)
+result = pool.map(mock_and_e, rp, chunksize=10)
 sender.send(0)
 bar.join()
-e = np.array(result).reshape(xx.shape)
-# pbar.close()
-
+e = np.array(result)
 if args.out:
-    output = f'./e/{args.out}'
+    output = f'./e-r/{args.out}'
 else:
     output = f'./e/e_galsim_simple_deltaPix={deltaPix:.2f}'
 print(f'writing to {output}')
-np.savetxt(output, e)
+np.savetxt(output, np.vstack(rp.reshape(-1, 1), e))
 
 if args.pickle:
     import pickle
