@@ -39,7 +39,7 @@ print(f'theta_E = {theta_E}')
 
 psf = galsim.Gaussian(fwhm=fwhm, flux=1)
 amp = 10
-# setup the keyword arguments to create the Data() class #
+
 
 class SimpleImageModel:
     def __init__(self, pixel_size, nx, ny, origin, psf):
@@ -72,7 +72,8 @@ class SimpleImageModel:
         image = con_p.drawImage(nx=self.nx, ny=self.ny, scale=self.pix_size, offset=(x_p/self.pix_size, y_p/self.pix_size))
         image = con_n.drawImage(image, scale=self.pix_size, add_to_image=True, offset=(x_n/self.pix_size, y_n/self.pix_size))
         return image
-# define the numerics #
+
+
 mymodel = SimpleImageModel(deltaPix, num_pix, num_pix, (0, 0), psf)
 
 num = 30

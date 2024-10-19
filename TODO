@@ -1,0 +1,11 @@
+plot  theta_E, beta  ellipticity figure.
+
+1000 M_sun
+velocity~200 km/s
+t_E ~ month
+
+plot
+magnitude curve
+ellipticity curve
+
+

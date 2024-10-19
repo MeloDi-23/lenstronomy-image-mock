@@ -90,7 +90,6 @@ import multiprocessing as mp
 
 sender, recev = mp.Pipe()
 
-from calc_moments import calc_ellip
 def mock_and_e(radius):
     ee = np.zeros(Nrand)
     theta = np.random.uniform(0, 2*np.pi, Nrand)
@@ -103,7 +102,14 @@ def mock_and_e(radius):
         image = mymodel.mock_image(
             theta_E, x_l, y_l, x_ps, y_ps, amp
         )
-        ee[k] = calc_ellip(image.array)[-1]
+        try:
+            res = galsim.hsm.FindAdaptiveMom(image)
+            ee[k] = res.observed_shape.e
+        except galsim.errors.GalSimHSMError as exp:
+            print(f'{exp}:')
+            print_err((x_ps, y_ps), (x_l, y_l), image)
+            ee[k] = np.nan
+            continue
     sender.send(1)
     return np.nanmean(ee), np.nanstd(ee, ddof=1)
 
@@ -128,7 +134,7 @@ e = np.array(result)
 if args.out:
     output = f'./e-r/{args.out}'
 else:
-    output = f'./e-r/e_galsim_simple_deltaPix={deltaPix:.2f}'
+    output = f'./e-r/e_simple_deltaPix={deltaPix:.2f}'
 print(f'writing to {output}')
 np.savetxt(output, np.concatenate((rp.reshape(-1, 1), e), axis=1))
 
