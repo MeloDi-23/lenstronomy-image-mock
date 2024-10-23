@@ -2,11 +2,11 @@ import numpy as np
 import galsim
 from lenstronomy.Cosmo.micro_lensing import einstein_radius
 from tqdm import tqdm
-from calc_moments import calc_ellip as _calc_e_for_image
+from calc_moments import calc_ellip as _calc_e_for_image    # this can be changed
 
 def ellipticity(deltaPix, fwhm, beta, 
                 d_l=None, d_s=None, M_0=None, theta_E=None, 
-                mean_value=True, verbose=False, use_galsim=True, add_noise=False, snr=100, sky_level=0.0):
+                mean_value=True, verbose=False, flux=100, use_galsim=True, add_noise=False, snr=100, sky_level=0.0):
     try:
         if d_l is None:
             assert d_s is None and M_0 is None
@@ -37,15 +37,14 @@ def ellipticity(deltaPix, fwhm, beta,
 
     Nmeans = 20 if mean_value else 1
     for i, (b, theta) in iter:
-        result[i], err[i] = ellipticity_single(deltaPix, fwhm, b, theta, Nmeans, use_galsim, add_noise, snr, sky_level)
+        result[i], err[i] = ellipticity_single(deltaPix, fwhm, b, theta, Nmeans, flux, use_galsim, add_noise, snr, sky_level)
     return result.reshape(beta.shape), err.reshape(beta.shape)
 
 
-def ellipticity_single(deltaPix, fwhm, beta, theta_E, N_mean, use_galsim, add_noise, snr, sky_level):
+def ellipticity_single(deltaPix, fwhm, beta, theta_E, N_mean, flux, use_galsim, add_noise, snr, sky_level):
     res = np.zeros(N_mean, dtype=float)
     figsize = (fwhm+theta_E)*5
     num_pix = int(figsize/deltaPix)
-    amp = 10
     psf = galsim.Gaussian(fwhm=fwhm, flux=1)
     mymodel = SimpleImageModel(deltaPix, num_pix, num_pix, (0, 0), psf)
 
@@ -55,8 +54,9 @@ def ellipticity_single(deltaPix, fwhm, beta, theta_E, N_mean, use_galsim, add_no
 
     if use_galsim:
         ellip = lambda image: galsim.hsm.FindAdaptiveMom(image).observed_shape.e
+        # this sometimes raises exception because the Object is too small, you should not make the PSF too small.
     else:
-        ellip = lambda image: _calc_e_for_image(image.array)[2]
+        ellip = lambda image: _calc_e_for_image(image).e
 
     
     for i in range(N_mean):
@@ -64,7 +64,7 @@ def ellipticity_single(deltaPix, fwhm, beta, theta_E, N_mean, use_galsim, add_no
         x_l = x_ps + x[i]
         y_l = y_ps + y[i]
         image = mymodel.mock_image(
-            theta_E, x_l, y_l, x_ps, y_ps, amp
+            theta_E, x_l, y_l, x_ps, y_ps, flux
         )
         if add_noise:
             addPoissonNoiseSNR(image, snr, sky_level)
@@ -77,6 +77,45 @@ def ellipticity_single(deltaPix, fwhm, beta, theta_E, N_mean, use_galsim, add_no
             continue
     return np.nanmean(res), np.nanstd(res, ddof=1)
 
+def ellipticity_image_mock(deltaPix, fwhm, x_ps, y_ps, x_l, y_l, theta_E, flux, use_galsim, add_noise, snr, sky_level):
+    """
+    returns the real image of mock, and give the ellipticity
+    """
+    figsize = (fwhm+theta_E)*6
+    num_pix = int(figsize/deltaPix)
+
+    psf = galsim.Gaussian(fwhm=fwhm, flux=1)
+    mymodel = SimpleImageModel(deltaPix, num_pix, num_pix, (0, 0), psf)
+    
+    image = mymodel.mock_image(
+        theta_E, x_l, y_l, x_ps, y_ps, flux
+    )
+    ratio = 1
+    if add_noise:
+        ratio = addPoissonNoiseSNR(image, snr, sky_level)
+
+    if use_galsim:
+        def findMom(image):
+            mom = image.FindAdaptiveMom()
+            return mom.observed_shape.e, mom.moments_sigma
+    else:
+        def findMom(image):
+            res = _calc_e_for_image(image)
+            return res.e, res.moments_sigma
+
+    e, sig = findMom(image)
+    if add_noise:
+        Ne = ratio*flux
+        sky = ratio*sky_level
+        R2 = 1
+        sigma_sky = sig/(R2*Ne)*np.sqrt(4*np.pi*sky)
+        sigma_star = 1/R2 * np.sqrt(64/(27*Ne))
+        sigma = np.sqrt(sigma_sky**2 + sigma_star**2)
+    else:
+        sigma = 0
+    
+
+    return {'e': e, 'e_err': sigma, 'image': image}
 
 def addPoissonNoiseSNR(image, snr, sky_level):
     # add poisson noise to the image. rescale the image value first, so that it meets the target SNR.
@@ -90,9 +129,7 @@ def addPoissonNoiseSNR(image, snr, sky_level):
     sky_level *= ratio
     image.addNoise(galsim.PoissonNoise(sky_level=sky_level))
 
-    refined = np.maximum(image.array, 0)
-    w = refined
-    return (w*refined).sum() / np.sqrt((w*w*refined).sum())
+    return ratio
 
 
 class SimpleImageModel:
