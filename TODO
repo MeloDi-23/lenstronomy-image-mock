@@ -1,6 +1,0 @@
-1000 M_sun
-velocity~200 km/s
-t_E ~ month
-
-make a MCMC table, varying M and velocity.
-model the amplification & shape simutaniously.

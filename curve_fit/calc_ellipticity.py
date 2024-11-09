@@ -7,6 +7,18 @@ from calc_moments import calc_ellip as _calc_e_for_image    # this can be change
 def ellipticity(deltaPix, fwhm, beta, 
                 d_l=None, d_s=None, M_0=None, theta_E=None, 
                 mean_value=True, verbose=False, flux=100, use_galsim=True, add_noise=False, snr=100, sky_level=0.0):
+    """
+    calculate the ellipticity with given microlensing parameters.
+    you can only define the d_l+d_+M_0, or theta_E.
+    If theta_E or beta is array-like, they must be able to be cast to the same shape.
+    use_galsim: means using adaptive momentum method, and non galsim method is to calculate 
+        momentum directly without any weight. adaptive momentum method sometimes raises 
+        exception when the Object is too small. To avoid that, you should not set the PSF 
+        too small compared to the pixel size.
+    add_noise: determines whether to add poisson noise. the image and sky_level is scaled 
+        in order to meet the snr. when you use non-galsim method and add a lot of possion noise, 
+        this code will perform poor.
+    """
     try:
         if d_l is None:
             assert d_s is None and M_0 is None
@@ -54,7 +66,6 @@ def ellipticity_single(deltaPix, fwhm, beta, theta_E, N_mean, flux, use_galsim, 
 
     if use_galsim:
         ellip = lambda image: galsim.hsm.FindAdaptiveMom(image).observed_shape.e
-        # this sometimes raises exception because the Object is too small, you should not make the PSF too small.
     else:
         ellip = lambda image: _calc_e_for_image(image).e
 
@@ -79,7 +90,8 @@ def ellipticity_single(deltaPix, fwhm, beta, theta_E, N_mean, flux, use_galsim, 
 
 def ellipticity_image_mock(deltaPix, fwhm, x_ps, y_ps, x_l, y_l, theta_E, flux, use_galsim, add_noise, snr, sky_level):
     """
-    returns the real image of mock, and give the ellipticity
+    returns the real image of mock with noise, estimate the ellipticity and error.
+    There is a problem here: Should the sky level and time be the same over a series of observations?
     """
     figsize = (fwhm+theta_E)*6
     num_pix = int(figsize/deltaPix)
@@ -117,11 +129,12 @@ def ellipticity_image_mock(deltaPix, fwhm, x_ps, y_ps, x_l, y_l, theta_E, flux, 
 
     return {'e': e, 'e_err': sigma, 'image': image}
 
-def addPoissonNoiseSNR(image, snr, sky_level):
+
+def _addPoissonNoiseSNR_1(image, snr, sky_level):
     # add poisson noise to the image. rescale the image value first, so that it meets the target SNR.
-    refined = np.maximum(image.array, 0)    # some times the value of pixel is negative, because of fft.
-    w = refined
-    snr_old = (w*refined).sum() / np.sqrt((w*w*(refined + sky_level)).sum())
+    brightness = image.array           # some times the value of pixel is negative, because of fft.
+    w = brightness
+    snr_old = (w*brightness).sum() / np.sqrt((w*w*(brightness + sky_level)).sum())
     ratio = snr / snr_old
     ratio = ratio * ratio
 
@@ -130,6 +143,24 @@ def addPoissonNoiseSNR(image, snr, sky_level):
     image.addNoise(galsim.PoissonNoise(sky_level=sky_level))
 
     return ratio
+
+def _addPoissonNoiseSNR_2(image, snr, sky_level):
+    brightness = image.array           # some times the value of pixel is negative, because of fft.
+    psf = brightness.copy()                    # use surface brightness to estimate psf.
+    psf /= psf.sum()
+    sharpness = (psf*psf).sum()
+    snr_old = brightness.sum() / (np.sqrt(brightness.sum() + sky_level/sharpness))
+    ratio = snr / snr_old
+    ratio = ratio * ratio
+
+    image *= ratio
+    sky_level *= ratio
+    image.addNoise(galsim.PoissonNoise(sky_level=sky_level))
+
+    return ratio
+
+
+addPoissonNoiseSNR = _addPoissonNoiseSNR_2
 
 
 class SimpleImageModel:
