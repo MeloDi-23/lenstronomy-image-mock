@@ -17,3 +17,6 @@ Note that larger M and smaller D_l gives larger theta_E
 **this table rely on the choice of psf and delta_pix.**
 
 Try other psf: eg: Kolmogorov psf profile.
+0.005
+JWST PSF
+PRL
