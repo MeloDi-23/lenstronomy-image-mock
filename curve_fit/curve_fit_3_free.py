@@ -1,3 +1,7 @@
+""""
+Uses the old interpolation table.
+"""
+
 import emcee
 from scipy.interpolate import RegularGridInterpolator
 import numpy as np

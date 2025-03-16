@@ -1,0 +1,22 @@
+t0:
+  init: 0
+  free: true
+  prior: [-100, 100]
+M:
+  init: 500
+  free: true
+  prior: [50, 1000]
+v:
+  init: 400
+  free: true
+  prior: [100, 800]
+d_l:
+  init: 4000
+  free: false
+  prior: [2000, 6000]
+d_s:
+  init: 8000
+u_min:
+  init: 0.2
+  free: false
+  prior: [0.1, 0.7]

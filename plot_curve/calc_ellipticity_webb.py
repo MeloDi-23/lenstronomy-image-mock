@@ -76,7 +76,7 @@ def ellipticity_single(deltaPix, fwhm, beta, theta_E, N_mean, flux, use_galsim, 
 
     if use_galsim:
         def ellip(image):
-            shear = image.findAdaptiveMom().observed_shape
+            shear = image.FindAdaptiveMom().observed_shape
             return (shear-base_shear).e
     else:
         ellip = lambda image: _calc_e_for_image(image).e
@@ -119,7 +119,7 @@ def ellipticity_image_mock(deltaPix, fwhm, x_ps, y_ps, x_l, y_l, theta_E, flux, 
 
     if use_galsim:
         def findMom(image):
-            mom = image.findAdaptiveMom()
+            mom = image.FindAdaptiveMom()
             shear = mom.observed_shape
             return (shear-base_shear).e, mom.moments_sigma
         # def findMom(image):

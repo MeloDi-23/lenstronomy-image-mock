@@ -1,6 +1,7 @@
 """"
 Uses the new interpolation table
 and the configure manager (read from yaml)
+consider the error of interpolation table.
 """
 
 import emcee
@@ -12,12 +13,14 @@ from parameter_manager import ParameterManager
 import astropy.units as u
 
 
-with open('ellip_table_tu.npy', 'rb') as f:
+with open('ellip_table_webb.npy', 'rb') as f:
     theta_E0 = np.load(f)
     u0 = np.load(f)
     table = np.load(f)
+    table_err = np.load(f)
 
 interpolator = RegularGridInterpolator((u0, theta_E0), table, bounds_error=False, fill_value=None)
+interpolator_err = RegularGridInterpolator((u0, theta_E0), table_err, bounds_error=False, fill_value=None)
 
 pc2km = u.pc.to(u.km)
 sec2day = u.s.to(u.day)
@@ -37,17 +40,18 @@ def get_data(t, t0, M, v, d_l, d_s, u_min):
     u = np.sqrt(u_min*u_min + ((t-t0)/t_E)**2)
     new_x = np.stack((u, np.ones_like(u)*theta_E), axis=-1)
     y = interpolator(new_x)
+    y_err = interpolator_err(new_x)
     if np.isnan(y).any():
         print(t, t0, M, v, d_l, d_s, u_min)
         import sys
         sys.exit(1)
-    return y
+    return y, y_err
 
-t_obs, e_obs, err_obs = np.load('mock2.npy')
+t_obs, e_obs, err_obs = np.load('mock3_webb.npy')
 
 def ln_like(**kwargs):
-    res = get_data(t_obs, **kwargs)
-    chi_2 = (((res - e_obs)/err_obs)**2).sum()
+    res, err_sys = get_data(t_obs, **kwargs)
+    chi_2 = ((res - e_obs)**2/(err_obs**2 + err_sys**2)).sum()
     return -chi_2
 
 
@@ -63,7 +67,7 @@ if __name__ == '__main__':
     init_state = manager.random_init_state(Nwalkers)
 
     Ndim = manager.ndim
-    backend = emcee.backends.HDFBackend('backend_free_dl.h5')
+    backend = emcee.backends.HDFBackend('backend_new_para.h5')
     backend.reset(Nwalkers, Ndim)
 
     sampler = emcee.EnsembleSampler(Nwalkers, Ndim, manager.lnlikely, pool, backend=backend)

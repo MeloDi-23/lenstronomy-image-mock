@@ -66,7 +66,7 @@ def ellipticity(deltaPix, fwhm, beta,
 def ellipticity_single(deltaPix, fwhm, beta, theta_E, N_mean, flux, use_galsim, add_noise, snr, sky_level):
     res = np.zeros(N_mean, dtype=float)
     figsize = (fwhm+theta_E)*5
-    num_pix = int(figsize/deltaPix)\
+    num_pix = int(figsize/deltaPix)
 
     mymodel = SimpleImageModel(deltaPix, num_pix, num_pix, (0, 0), galsim_psf)
 
